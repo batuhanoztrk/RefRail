@@ -41,7 +41,12 @@ jobs:
           cache: false # No external Go modules or go.sum.
       - name: Formatting and vet
         run: |
-          test -z "$(gofmt -l $(git ls-files '*.go'))"
+          unformatted="$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
+          if [ -n "$unformatted" ]; then
+            echo 'Run gofmt on the following files:' >&2
+            printf '%s\n' "$unformatted" >&2
+            exit 1
+          fi
           go vet ./...
       - name: Build native bundle and require real Lefthook tests
         run: |

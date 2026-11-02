@@ -1,0 +1,2 @@
+# Keep source and release inputs consistent across platforms, including Windows.
+* text=auto eol=lf
