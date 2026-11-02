@@ -1,6 +1,8 @@
 package i18n
 
 var turkish = map[string]string{
+	"Cannot locate Git runtime directories: %w":                         "Git çalışma zamanı dizinleri bulunamadı: %w",
+	"Git --exec-path did not return an absolute directory: %s":          "Git --exec-path mutlak bir dizin döndürmedi: %s",
 	"RefRail executable is missing; restore the bundle or reinstall.":   "RefRail aracı eksik; paketi geri yükleyin veya yeniden kurun.",
 	"Usage: refrail %s [options]":                                       "Kullanım: refrail %s [seçenekler]",
 	"%s cannot expand the shared policy: %q":                            "%s ortak politikayı genişletemez: %q",

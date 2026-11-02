@@ -66,6 +66,14 @@ jobs:
         run: |
           target="$(go env GOOS)-$(go env GOARCH)"
           go run ./tools/sandbox --bundle "dist/$RELEASE_VERSION/$target" --out sandbox/ci
+      - name: Upload sandbox report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: sandbox-report-${{ matrix.os }}
+          path: sandbox/ci/report.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   packages:
     name: Build and validate distribution assets

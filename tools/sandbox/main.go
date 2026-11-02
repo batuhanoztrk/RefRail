@@ -25,6 +25,7 @@ type Report struct {
 	Platform                string `json:"platform"`
 	WithoutLanguageRuntimes bool   `json:"withoutLanguageRuntimes"`
 	WithoutSystemLefthook   bool   `json:"withoutSystemLefthook"`
+	RuntimePath             string `json:"runtimePath,omitempty"`
 	Steps                   []Step `json:"steps"`
 }
 
@@ -95,7 +96,11 @@ func run() error {
 		report.Steps = append(report.Steps, Step{name, passed, code, string(output)})
 		fmt.Printf("%s: %v\n", name, passed)
 		if !passed {
-			return i18n.Errorf("%s did not produce the expected result: %s", name, string(output))
+			detail := string(output)
+			if err != nil {
+				detail = fmt.Sprintf("%v\n%s", err, output)
+			}
+			return i18n.Errorf("%s did not produce the expected result: %s", name, detail)
 		}
 		return nil
 	}
@@ -121,7 +126,7 @@ func run() error {
 	}
 	// Limit PATH before install, not just before running hooks. This proves the
 	// installer does not depend on a preinstalled Lefthook or language runtime.
-	runtimePath, err := runtimeOnlyPath(dir, git)
+	runtimePath, err := runtimeOnlyPath(dir, git, env)
 	if err != nil {
 		return err
 	}
@@ -132,6 +137,8 @@ func run() error {
 		}
 	}
 	env = append(env, "PATH="+runtimePath)
+	report.RuntimePath = runtimePath
+	fmt.Println("Runtime-only PATH:", runtimePath)
 	for _, name := range []string{"node", "npm", "go", "rustc", "cargo"} {
 		if executableIn(name, runtimePath) {
 			return i18n.Errorf("Runtime-only PATH still contains %s", name)
@@ -191,11 +198,22 @@ func executableIn(name, pathValue string) bool {
 	return false
 }
 
-func runtimeOnlyPath(dir, git string) (string, error) {
+func runtimeOnlyPath(dir, git string, env []string) (string, error) {
 	if runtime.GOOS == "windows" {
-		gitDir := filepath.Dir(git)
-		root := filepath.Dir(gitDir)
-		paths := []string{gitDir, filepath.Join(root, "bin"), filepath.Join(root, "usr", "bin"), filepath.Join(os.Getenv("SystemRoot"), "System32")}
+		// Git may be found through cmd/git.exe, bin/git.exe, or the actual
+		// toolchain bin/git.exe. Only --exec-path identifies its runtime tree
+		// independently of the entry point and architecture.
+		cmd := exec.Command(git, "--exec-path")
+		cmd.Env = env
+		output, err := cmd.Output()
+		if err != nil {
+			return "", i18n.Errorf("Cannot locate Git runtime directories: %w", err)
+		}
+		execPath := filepath.Clean(strings.TrimSpace(string(output)))
+		if !filepath.IsAbs(execPath) {
+			return "", i18n.Errorf("Git --exec-path did not return an absolute directory: %s", execPath)
+		}
+		paths := windowsRuntimePaths(git, execPath, os.Getenv("SystemRoot"))
 		return strings.Join(paths, string(os.PathListSeparator)), nil
 	}
 	p := filepath.Join(dir, "runtime-bin")
@@ -212,4 +230,26 @@ func runtimeOnlyPath(dir, git string) (string, error) {
 		}
 	}
 	return p, nil
+}
+
+func windowsRuntimePaths(git, execPath, systemRoot string) []string {
+	// Git for Windows stores native helpers in <toolchain>/libexec/git-core
+	// and its DLLs in <toolchain>/bin. Shell utilities live in <Git>/usr/bin.
+	toolchain := filepath.Dir(filepath.Dir(execPath))
+	root := filepath.Dir(toolchain)
+	candidates := []string{
+		filepath.Dir(git), execPath, filepath.Join(toolchain, "bin"),
+		filepath.Join(root, "bin"), filepath.Join(root, "usr", "bin"),
+		filepath.Join(systemRoot, "System32"),
+	}
+	var paths []string
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		key := strings.ToLower(filepath.Clean(candidate))
+		if !seen[key] {
+			paths = append(paths, candidate)
+			seen[key] = true
+		}
+	}
+	return paths
 }
