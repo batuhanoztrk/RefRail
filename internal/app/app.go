@@ -295,7 +295,9 @@ func hookRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		}
 		env = append(env, item)
 	}
-	env = append(env, "LEFTHOOK_CONFIG="+filepath.Join(v.Root, "lefthook.yml"), "LEFTHOOK_BIN="+lefthook, "REFRAIL_BIN="+executable, "NO_COLOR=1")
+	// Git for Windows runs the validator through sh. Use shell-compatible path
+	// separators while retaining native paths for Go's direct process execution.
+	env = append(env, "LEFTHOOK_CONFIG="+filepath.Join(v.Root, "lefthook.yml"), "LEFTHOOK_BIN="+lefthook, "REFRAIL_BIN="+filepath.ToSlash(executable), "NO_COLOR=1")
 	if hook == "commit-msg" {
 		env = append(env, "REFRAIL_MESSAGE_FILE="+args[1])
 	} else {

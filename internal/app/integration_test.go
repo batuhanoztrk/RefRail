@@ -128,7 +128,7 @@ func isolate(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("REFRAIL_HOME", filepath.Join(t.TempDir(), "tools ' dollar $"))
+	t.Setenv("REFRAIL_HOME", filepath.Join(t.TempDir(), "tools ' dollar $ [glob] ; &"))
 }
 func newRepo(t *testing.T, pkg string, legacy bool) *testRepo {
 	t.Helper()

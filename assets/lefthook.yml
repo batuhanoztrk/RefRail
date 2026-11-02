@@ -2,13 +2,16 @@ no_auto_install: true
 no_tty: true
 assert_lefthook_installed: true
 
+# Lefthook 2.1.17's Windows launcher wraps run commands in unescaped double
+# quotes. Keep these commands quote-free; disable splitting and glob expansion
+# so the executable environment variable still expands to exactly one argument.
 commit-msg:
   commands:
     refrail-commit-policy:
-      run: '"$REFRAIL_BIN" commit-msg'
+      run: 'IFS=; set -f; exec ${REFRAIL_BIN:?} commit-msg'
 
 pre-push:
   commands:
     refrail-push-policy:
-      run: '"$REFRAIL_BIN" pre-push'
+      run: 'IFS=; set -f; exec ${REFRAIL_BIN:?} pre-push'
       use_stdin: true
