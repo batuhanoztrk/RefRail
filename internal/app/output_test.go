@@ -22,7 +22,7 @@ func TestCommitDiagnosticPresentation(t *testing.T) {
 		heading, message, expected, optional, example string
 	}{
 		{i18n.English, "Commit message does not meet the policy", "Your message:", "Expected: type(scope)!: description", "scope and ! are optional", "Example:"},
-		{i18n.Turkish, "Commit mesajı uygun değil", "Mesajınız:", "Beklenen: type(scope)!: açıklama", "scope ve ! isteğe bağlıdır", "Örnek:"},
+		{i18n.Turkish, "Commit mesajı kurallara uymuyor", "Mesajınız:", "Beklenen: type(scope)!: açıklama", "scope ve ! isteğe bağlıdır", "Örnek:"},
 	} {
 		t.Run(string(tc.language), func(t *testing.T) {
 			err := withCommitMessage(c.ValidateCommit("test commit\nbody"), "test commit\nbody")

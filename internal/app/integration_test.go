@@ -524,7 +524,7 @@ func TestLocalizedCLIAndHooks(t *testing.T) {
 	r.command(0, "install", "--bundle", pkg)
 	for _, tc := range []struct{ language, commands, errorLabel, heading, format string }{
 		{"en", "Commands:", "Error:", "Commit message does not meet the policy", "Expected: type(scope)!: description"},
-		{"tr", "Komutlar:", "Hata:", "Commit mesajı uygun değil", "Beklenen: type(scope)!: açıklama"},
+		{"tr", "Komutlar:", "Hata:", "Commit mesajı kurallara uymuyor", "Beklenen: type(scope)!: açıklama"},
 	} {
 		t.Run(tc.language, func(t *testing.T) {
 			t.Setenv("REFRAIL_LANG", tc.language)
