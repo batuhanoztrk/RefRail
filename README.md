@@ -8,9 +8,35 @@ RefRail helps teams use Conventional Commits and consistent branch names across 
 
 **Developers need Git and the platform bundle.** Node.js, npm, Go, Rust, and a preinstalled Lefthook are not required. The bundle includes a pinned Lefthook executable. Installation and daily checks work offline without administrator access. Windows requires the shell provided by Git for Windows.
 
+## Package managers
+
+Once the first release and package submissions are published:
+
+```sh
+brew install batuhanoztrk/tap/refrail
+refrail install --repo "/path/to/project"
+```
+
+```powershell
+winget install --exact --id batuhanoztrk.RefRail
+refrail install --repo "C:\Projects\app"
+```
+
+Homebrew supports macOS and Linux, on Intel/AMD64 and ARM64. WinGet packages
+target Windows x64 and ARM64 and declare Git for Windows as a dependency.
+RefRail finds its complete bundle through the package manager's executable
+link; `--bundle` remains available for explicit offline bundles.
+
+After `brew upgrade` or `winget upgrade`, run `refrail update --repo <path>`
+for each clone you want to upgrade. Existing clones retain their pinned bundle.
+Before removing the CLI, use `refrail uninstall --repo <path>` for each clone
+whose hooks you want removed. See the [publishing guide](docs/releasing.md)
+for GitHub Actions, credentials, and first-release setup.
+
 ## Install after cloning
 
-Extract the ZIP for your OS and architecture. From the extracted bundle root:
+Extract the ZIP for your OS and architecture and enter the enclosed `refrail`
+directory. From that bundle root:
 
 ```sh
 ./bin/refrail install --repo "/path/to/project" --bundle "."

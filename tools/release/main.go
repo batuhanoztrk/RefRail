@@ -297,7 +297,10 @@ func archiveBundle(dir, filename string) error {
 		if err != nil {
 			return err
 		}
-		header := &zip.FileHeader{Name: filepath.ToSlash(rel), Method: zip.Deflate}
+		// Keep package-manager bookkeeping outside the strictly verified bundle.
+		// Homebrew strips this common archive directory when staging the formula;
+		// WinGet retains it and creates its portable index in the parent directory.
+		header := &zip.FileHeader{Name: "refrail/" + filepath.ToSlash(rel), Method: zip.Deflate}
 		header.SetMode(st.Mode())
 		header.SetModTime(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC))
 		w, err := archive.CreateHeader(header)

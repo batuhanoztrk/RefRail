@@ -10,6 +10,11 @@ RefRail is a Go CLI. Keep policy validation separate from Git processes, install
 
 Real-hook tests discover a native bundle's Lefthook, accept `REFRAIL_TEST_LEFTHOOK`, or use Lefthook 2.1.17 from PATH. They use isolated Git repositories and compiled executables; never install hooks in unrelated repositories during tests.
 
+GitHub Actions run native tests and the sandbox on macOS, Linux, and Windows,
+cross-build all six bundles, validate WinGet manifests, and install/test the
+generated Homebrew formula. See [Publishing RefRail](docs/releasing.md) for
+release tags, draft releases, the upstream tap, and WinGet submission.
+
 ## Compatibility
 
 - Project settings may tighten shared rules, never relax them.

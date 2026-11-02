@@ -10,7 +10,34 @@ Lefthook ve Go tabanlı yerel commit/branch doğrulaması. Geliştirici bilgisay
 
 ## Geliştirici: tek komutla etkinleştirme
 
-İşletim sisteminize/mimarinize uygun ZIP'i açın. Paket kökünden:
+İlk release ve paket başvuruları yayımlandıktan sonra paket yöneticisiyle kurulum:
+
+```sh
+brew install batuhanoztrk/tap/refrail
+refrail install --repo "/proje/dizini"
+```
+
+```powershell
+winget install --exact --id batuhanoztrk.RefRail
+refrail install --repo "C:\Projeler\uygulama"
+```
+
+Homebrew tap deposu `batuhanoztrk/homebrew-tap`, kısa tap adı
+`batuhanoztrk/tap` şeklindedir. Homebrew macOS/Linux AMD64 ve ARM64, WinGet ise
+Windows x64 ve ARM64 paketlerini kullanır. WinGet, Git for Windows bağımlılığını
+da bildirir. CLI kendi paketini otomatik bulur; `--bundle` açıkça belirtilirse
+o yol kullanılır. `brew upgrade` veya `winget upgrade` sonrasında mevcut
+clone'lar eski sürümlerini korur; geçirmek istediğiniz her clone için
+`refrail update --repo <yol>` çalıştırın. CLI'ı kaldırmadan önce hook'larını
+kaldırmak istediğiniz her clone'da `refrail uninstall --repo <yol>` kullanın.
+
+CI, tag ile taslak release üretimi ve Homebrew/WinGet dağıtım workflow'ları
+hazırdır. İlk GitHub kurulumu, secret'lar ve yayın sırası için
+[yayın rehberine](releasing.md) bakın. WinGet paketinin katalogda görünmesi
+Microsoft'un PR doğrulaması ve kabulünden sonra gerçekleşir.
+
+İşletim sisteminize/mimarinize uygun ZIP'i açıp içindeki `refrail` dizinine
+girin. Bu paket kökünden:
 
 ```sh
 ./bin/refrail install --repo "/proje/dizini" --bundle "."

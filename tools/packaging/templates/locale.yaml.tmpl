@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+PackageIdentifier: {{.Identifier}}
+PackageVersion: {{quote .Version}}
+PackageLocale: en-US
+Publisher: {{quote .Publisher}}
+PublisherUrl: https://github.com/{{.Repository}}
+PublisherSupportUrl: https://github.com/{{.Repository}}/issues
+PackageName: RefRail
+PackageUrl: https://github.com/{{.Repository}}
+License: MIT
+LicenseUrl: https://github.com/{{.Repository}}/blob/{{.Tag}}/LICENSE
+ShortDescription: Portable Git commit and branch policy checks powered by Go and Lefthook.
+Moniker: refrail
+Tags:
+  - git
+  - hooks
+  - conventional-commits
+  - lefthook
+ReleaseNotesUrl: https://github.com/{{.Repository}}/releases/tag/{{.Tag}}
+InstallationNotes: Enable each clone with 'refrail install --repo <path>'. After upgrading, run 'refrail update --repo <path>'.
+ManifestType: defaultLocale
+ManifestVersion: 1.10.0

@@ -160,6 +160,70 @@ func (r *testRepo) git(ok bool, args ...string) string {
 	}
 	return string(b)
 }
+
+func TestPackageManagerBundleDiscovery(t *testing.T) {
+	pkg := testBundle(t, Version)
+	for _, linked := range []bool{false, true} {
+		name := "direct"
+		if linked {
+			name = "linked"
+		}
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			r := newRepo(t, pkg, true)
+			if linked {
+				link := filepath.Join(t.TempDir(), bundle.Executable("refrail", runtime.GOOS))
+				if err := os.Symlink(r.cli, link); err != nil {
+					if runtime.GOOS == "windows" {
+						t.Skip("Windows symlink privilege unavailable:", err)
+					}
+					t.Fatal(err)
+				}
+				r.cli = link
+			}
+			command := func(want int, args ...string) {
+				t.Helper()
+				cmd := exec.Command(r.cli, args...)
+				cmd.Dir = r.dir
+				output, err := cmd.CombinedOutput()
+				got := 0
+				if err != nil {
+					if exit, ok := err.(*exec.ExitError); ok {
+						got = exit.ExitCode()
+					} else {
+						t.Fatal(err)
+					}
+				}
+				if got != want {
+					t.Fatalf("CLI %v code=%d want=%d: %s", args, got, want, output)
+				}
+			}
+			command(0, "version", "--json")
+			command(0, "install")
+			command(0, "doctor")
+			command(0, "update")
+			// An explicit path must win over automatic executable discovery.
+			command(2, "update", "--bundle", filepath.Join(t.TempDir(), "missing"))
+			command(0, "doctor")
+			command(0, "uninstall")
+			license := filepath.Join(pkg, "LICENSE")
+			original, err := os.ReadFile(license)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.WriteFile(license, original, 0644); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := os.WriteFile(license, []byte("corrupt"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			command(2, "version", "--json")
+			command(2, "install")
+		})
+	}
+}
 func (r *testRepo) command(code int, args ...string) string {
 	r.t.Helper()
 	var stdout, stderr bytes.Buffer

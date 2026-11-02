@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+PackageIdentifier: {{.Identifier}}
+PackageVersion: {{quote .Version}}
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: refrail\bin\refrail.exe
+    PortableCommandAlias: refrail
+UpgradeBehavior: uninstallPrevious
+Commands:
+  - refrail
+Dependencies:
+  PackageDependencies:
+    - PackageIdentifier: Git.Git
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/{{.Repository}}/releases/download/{{.Tag}}/refrail_{{.Tag}}_windows_amd64.zip
+    InstallerSha256: {{sha "windows_amd64"}}
+  - Architecture: arm64
+    InstallerUrl: https://github.com/{{.Repository}}/releases/download/{{.Tag}}/refrail_{{.Tag}}_windows_arm64.zip
+    InstallerSha256: {{sha "windows_arm64"}}
+ManifestType: installer
+ManifestVersion: 1.10.0

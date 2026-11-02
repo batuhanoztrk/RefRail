@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+    inputs:
+      source-ref:
+        type: string
+        default: ''
+      version:
+        type: string
+        default: v0.1.0
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Native checks (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      REFRAIL_LANG: en
+      RELEASE_VERSION: ${{ inputs.version || 'v0.1.0' }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.source-ref || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false # No external Go modules or go.sum.
+      - name: Formatting and vet
+        run: |
+          test -z "$(gofmt -l $(git ls-files '*.go'))"
+          go vet ./...
+      - name: Build native bundle and require real Lefthook tests
+        run: |
+          target="$(go env GOOS)/$(go env GOARCH)"
+          go run ./tools/release --version "$RELEASE_VERSION" --targets "$target"
+          exe=""
+          if [ "$(go env GOOS)" = windows ]; then exe=.exe; fi
+          lefthook="$PWD/dist/$RELEASE_VERSION/$(go env GOOS)-$(go env GOARCH)/bin/lefthook$exe"
+          test "$("$lefthook" version)" = 2.1.17
+          if [ "$(go env GOOS)" = windows ]; then lefthook="$(cygpath -w "$lefthook")"; fi
+          echo "REFRAIL_TEST_LEFTHOOK=$lefthook" >> "$GITHUB_ENV"
+      - name: Test both languages
+        run: |
+          go test ./... -count=1
+          REFRAIL_LANG=tr go test ./... -count=1
+      - name: Exercise real hooks without language runtimes
+        run: |
+          target="$(go env GOOS)-$(go env GOARCH)"
+          go run ./tools/sandbox --bundle "dist/$RELEASE_VERSION/$target" --out sandbox/ci
+
+  packages:
+    name: Build and validate distribution assets
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version || 'v0.1.0' }}
+      PACKAGE_IDENTIFIER: ${{ vars.WINGET_PACKAGE_IDENTIFIER || 'batuhanoztrk.RefRail' }}
+      PACKAGE_PUBLISHER: ${{ vars.WINGET_PUBLISHER || 'batuhanoztrk' }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.source-ref || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build all six bundles and generate metadata
+        run: |
+          go run ./tools/release --version "$RELEASE_VERSION"
+          go run ./tools/packaging --version "$RELEASE_VERSION" --repository "$GITHUB_REPOSITORY" \
+            --winget-id "$PACKAGE_IDENTIFIER" --publisher "$PACKAGE_PUBLISHER" \
+            --dist "dist/$RELEASE_VERSION" --out dist/packages
+          ruby -c dist/packages/homebrew/Formula/refrail.rb
+      - name: Validate WinGet against the vendored Microsoft schemas
+        run: |
+          python3 -m venv .cache/packaging-venv
+          .cache/packaging-venv/bin/pip install -r tools/packaging/requirements.txt
+          .cache/packaging-venv/bin/python tools/packaging/validate-winget.py dist/packages/winget
+      - name: Stage release assets
+        run: |
+          mkdir release-assets
+          cp "dist/$RELEASE_VERSION/"*.zip "dist/$RELEASE_VERSION/SHA256SUMS" release-assets/
+          python3 - <<'PY'
+          import shutil
+          shutil.make_archive('release-assets/homebrew-tap', 'zip', 'dist/packages/homebrew')
+          shutil.make_archive('release-assets/winget-manifests', 'zip', 'dist/packages/winget')
+          PY
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 14
+
+  homebrew:
+    name: Install and test generated Homebrew formula
+    needs: packages
+    runs-on: macos-latest
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_ANALYTICS: '1'
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-assets
+          path: release-assets
+      - name: Install the exact staged ZIP through a disposable tap
+        run: |
+          brew tap-new refrail/ci
+          tap="$(brew --repository refrail/ci)"
+          unzip -q release-assets/homebrew-tap.zip -d "$RUNNER_TEMP/formula"
+          export FORMULA_SOURCE="$RUNNER_TEMP/formula/Formula/refrail.rb"
+          export FORMULA_TARGET="$tap/Formula/refrail.rb"
+          export LOCAL_ASSETS="$PWD/release-assets"
+          python3 - <<'PY'
+          import os, pathlib, re
+          source = pathlib.Path(os.environ['FORMULA_SOURCE']).read_text()
+          source = re.sub(r'https://github\.com/[^/]+/[^/]+/releases/download/[^/]+/',
+                          pathlib.Path(os.environ['LOCAL_ASSETS']).as_uri() + '/', source)
+          pathlib.Path(os.environ['FORMULA_TARGET']).write_text(source)
+          PY
+          brew install --formula refrail/ci/refrail
+          brew test refrail/ci/refrail

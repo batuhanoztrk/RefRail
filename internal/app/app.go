@@ -73,7 +73,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, language i18n
 	var jsonOutput bool
 	switch command {
 	case "install", "update":
-		flags.StringVar(&packageDir, "bundle", "", i18n.Text(language, "Extracted distribution bundle directory (required)"))
+		flags.StringVar(&packageDir, "bundle", "", i18n.Text(language, "Extracted distribution bundle directory (defaults to this executable's bundle)"))
 	case "uninstall", "doctor":
 	case "commit-msg":
 		flags.StringVar(&file, "file", os.Getenv("REFRAIL_MESSAGE_FILE"), i18n.Text(language, "Commit message file"))
@@ -102,8 +102,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, language i18n
 			return err
 		}
 		info := VersionInfo{Version, c.Version, LefthookVersion, runtime.GOOS, runtime.GOARCH}
-		if exe, err := os.Executable(); err == nil {
-			root := filepath.Dir(filepath.Dir(exe))
+		if root, err := executableBundle(); err == nil {
 			if _, err := os.Stat(filepath.Join(root, bundle.ManifestName)); err == nil {
 				v, err := bundle.Verify(root, true)
 				if err != nil {
@@ -129,7 +128,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, language i18n
 	switch command {
 	case "install", "update":
 		if packageDir == "" {
-			return i18n.Errorf("--bundle is required")
+			packageDir, err = executableBundle()
+			if err != nil {
+				return i18n.Errorf("Cannot locate this executable's bundle; pass --bundle explicitly: %w", err)
+			}
 		}
 		if err := install.Install(r, packageDir, command == "update"); err != nil {
 			return err
@@ -174,6 +176,20 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, language i18n
 		return checkRange(r, c, from, to)
 	}
 	return nil
+}
+
+// Package managers expose the CLI through a link outside the bundle. Resolve
+// that link before looking for the manifest alongside the real bin directory.
+func executableBundle() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(filepath.Dir(exe)), nil
 }
 
 func effectivePolicy(r *gitrepo.Repo) (policy.Config, string, error) {

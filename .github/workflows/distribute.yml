@@ -1,0 +1,140 @@
+name: Distribute
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable GitHub Release tag (vMAJOR.MINOR.PATCH)
+        required: true
+        type: string
+      homebrew:
+        description: Update the upstream Homebrew tap
+        type: boolean
+        default: true
+      winget:
+        description: Submit a pull request to microsoft/winget-pkgs
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: distribution
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      DO_HOMEBREW: ${{ inputs.homebrew }}
+      DO_WINGET: ${{ inputs.winget }}
+      TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY || 'batuhanoztrk/homebrew-tap' }}
+      PACKAGE_IDENTIFIER: ${{ vars.WINGET_PACKAGE_IDENTIFIER || 'batuhanoztrk.RefRail' }}
+      PACKAGE_PUBLISHER: ${{ vars.WINGET_PUBLISHER || 'batuhanoztrk' }}
+    steps:
+      - name: Check all selected channels before making changes
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          WINGET_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$DO_HOMEBREW" = true || "$DO_WINGET" = true ]]
+          if [ "$DO_HOMEBREW" = true ]; then
+            [[ "$TAP_REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9-]*/homebrew-[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]
+            test -n "$TAP_TOKEN" || { echo 'Missing HOMEBREW_TAP_TOKEN.' >&2; exit 1; }
+          fi
+          if [ "$DO_WINGET" = true ]; then
+            test -n "$WINGET_TOKEN" || { echo 'Missing WINGET_CREATE_GITHUB_TOKEN.' >&2; exit 1; }
+          fi
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName > release.json
+          jq -e --arg tag "$RELEASE_TAG" '.isDraft == false and .isPrerelease == false and .tagName == $tag' release.json
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Regenerate metadata from the published release's verified ZIPs
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets \
+            --pattern 'refrail_*.zip' --pattern SHA256SUMS
+          go run ./tools/packaging --version "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" \
+            --winget-id "$PACKAGE_IDENTIFIER" --publisher "$PACKAGE_PUBLISHER" \
+            --dist release-assets --out packages
+          ruby -c packages/homebrew/Formula/refrail.rb
+          python3 -m venv .cache/packaging-venv
+          .cache/packaging-venv/bin/pip install -r tools/packaging/requirements.txt
+          .cache/packaging-venv/bin/python tools/packaging/validate-winget.py packages/winget
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: distribution-metadata
+          path: packages/
+          if-no-files-found: error
+          retention-days: 14
+
+  homebrew:
+    if: inputs.homebrew
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: distribution-metadata
+          path: packages
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ${{ vars.HOMEBREW_TAP_REPOSITORY || 'batuhanoztrk/homebrew-tap' }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Commit and push the formula to the tap default branch
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          mkdir -p Formula
+          cp ../packages/homebrew/Formula/refrail.rb Formula/refrail.rb
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Formula/refrail.rb
+          if git diff --cached --quiet; then
+            echo 'Formula is already up to date.'
+            exit 0
+          fi
+          git commit -m "chore: update refrail to $RELEASE_TAG"
+          git push origin HEAD
+
+  winget:
+    if: inputs.winget
+    needs: prepare
+    runs-on: windows-latest
+    env:
+      WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+      PACKAGE_IDENTIFIER: ${{ vars.WINGET_PACKAGE_IDENTIFIER || 'batuhanoztrk.RefRail' }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: distribution-metadata
+          path: packages
+      - name: Submit verified manifests to the Microsoft community repository
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tool = Join-Path $env:RUNNER_TEMP 'wingetcreate.exe'
+          Invoke-WebRequest 'https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe' -OutFile $tool
+          if ((Get-FileHash $tool -Algorithm SHA256).Hash.ToLowerInvariant() -ne '24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea') {
+            throw 'WinGetCreate checksum verification failed.'
+          }
+          $version = $env:RELEASE_TAG.Substring(1)
+          $partition = $env:PACKAGE_IDENTIFIER.Substring(0, 1).ToLowerInvariant()
+          $packagePath = $env:PACKAGE_IDENTIFIER.Replace('.', [IO.Path]::DirectorySeparatorChar)
+          $manifest = Join-Path 'packages/winget/manifests' "$partition/$packagePath/$version"
+          & $tool submit $manifest --no-open
+          if ($LASTEXITCODE -ne 0) { throw "WinGetCreate failed with exit code $LASTEXITCODE" }

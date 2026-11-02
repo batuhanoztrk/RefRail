@@ -1,0 +1,58 @@
+# Generated from the checksum-verified GitHub Release assets. Do not edit hashes.
+class Refrail < Formula
+  desc "Portable Git commit and branch policy checks"
+  homepage "https://github.com/{{.Repository}}"
+  version "{{.Version}}"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/{{.Repository}}/releases/download/{{.Tag}}/refrail_{{.Tag}}_darwin_arm64.zip"
+      sha256 "{{sha "darwin_arm64"}}"
+    end
+    on_intel do
+      url "https://github.com/{{.Repository}}/releases/download/{{.Tag}}/refrail_{{.Tag}}_darwin_amd64.zip"
+      sha256 "{{sha "darwin_amd64"}}"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/{{.Repository}}/releases/download/{{.Tag}}/refrail_{{.Tag}}_linux_arm64.zip"
+      sha256 "{{sha "linux_arm64"}}"
+    end
+    on_intel do
+      url "https://github.com/{{.Repository}}/releases/download/{{.Tag}}/refrail_{{.Tag}}_linux_amd64.zip"
+      sha256 "{{sha "linux_amd64"}}"
+    end
+  end
+
+  depends_on "git"
+
+  def install
+    # Keep the verified layout intact; do not expose the private Lefthook binary.
+    libexec.install Dir["*"]
+    # Prevent Homebrew's metafile fallback from moving LICENSE/README out of
+    # the verified bundle during its post-install housekeeping.
+    cp libexec/"LICENSE", prefix/"LICENSE"
+    bin.install_symlink libexec/"bin/refrail"
+  end
+
+  def caveats
+    <<~EOS
+      Enable RefRail for each clone: refrail install --repo /path/to/project
+      After upgrading: refrail update --repo /path/to/project
+      Existing clones retain their pinned bundle until you run update.
+    EOS
+  end
+
+  test do
+    ENV["REFRAIL_LANG"] = "en"
+    ENV["REFRAIL_HOME"] = (testpath/"tool-home").to_s
+    assert_match '"version":"{{.Tag}}"', shell_output("#{bin}/refrail version --json")
+    system "git", "-c", "init.templateDir=", "init", "--initial-branch=main", "project"
+    system bin/"refrail", "install", "--repo", testpath/"project"
+    system bin/"refrail", "doctor", "--repo", testpath/"project"
+    system bin/"refrail", "uninstall", "--repo", testpath/"project"
+  end
+end
