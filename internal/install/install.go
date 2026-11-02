@@ -316,27 +316,26 @@ func Install(r *gitrepo.Repo, dir string, update bool) error {
 	}
 	s := &State{SchemaVersion: 1, BundlePath: p, BundleDigest: v.Digest, Baseline: r.Head()}
 	if old != nil {
-		s.Baseline, s.BootstrapExecutable, s.BootstrapDigest = old.Baseline, old.BootstrapExecutable, old.BootstrapDigest
-		// A missing/corrupt bootstrap cannot be repaired without changing wrappers.
-		data, err := os.ReadFile(s.BootstrapExecutable)
-		if err != nil || bundle.Digest(data) != s.BootstrapDigest {
+		s.Baseline = old.Baseline
+		// Verify the existing installation before replacing its launcher.
+		data, err := os.ReadFile(old.BootstrapExecutable)
+		if err != nil || bundle.Digest(data) != old.BootstrapDigest {
 			return i18n.Errorf("Bootstrap executable is missing or corrupt; restore it from a trusted bundle or uninstall and install again")
 		}
-	} else {
-		s.BootstrapExecutable = filepath.Join(p, "bin", bundle.Executable("refrail", runtime.GOOS))
-		data, err := os.ReadFile(s.BootstrapExecutable)
-		if err != nil {
-			return err
-		}
-		s.BootstrapDigest = bundle.Digest(data)
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
+	s.BootstrapExecutable = filepath.Join(p, "bin", bundle.Executable("refrail", runtime.GOOS))
+	data, err := os.ReadFile(s.BootstrapExecutable)
+	if err != nil {
+		return err
+	}
+	s.BootstrapDigest = bundle.Digest(data)
+	data, err = json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
 	if old != nil {
-		return AtomicWrite(statePath(r), data, 0600)
+		return updateInstallation(r, old, s, data, AtomicWrite)
 	}
 	if err := os.Mkdir(StateDir(r), 0700); err != nil {
 		return err
@@ -391,6 +390,50 @@ func Install(r *gitrepo.Repo, dir string, update bool) error {
 			rollback()
 			return cerr
 		}
+	}
+	return nil
+}
+
+// The caller holds the lifecycle lock. Refresh launchers before committing the
+// new state so obsolete bootstrap behavior does not survive a bundle update.
+// Every replacement is atomic; on failure restore already-replaced wrappers.
+func updateInstallation(r *gitrepo.Repo, old, next *State, data []byte, write func(string, []byte, os.FileMode) error) error {
+	if old.BootstrapExecutable == next.BootstrapExecutable && old.BootstrapDigest == next.BootstrapDigest {
+		return write(statePath(r), data, 0600)
+	}
+	hooks, err := r.Path("hooks")
+	if err != nil {
+		return err
+	}
+	type replacedHook struct {
+		path string
+		name string
+		mode os.FileMode
+	}
+	var replaced []replacedHook
+	rollback := func(cause error) error {
+		failures := []error{cause}
+		for i := len(replaced) - 1; i >= 0; i-- {
+			hook := replaced[i]
+			if err := write(hook.path, Wrapper(old, hook.name), hook.mode); err != nil {
+				failures = append(failures, err)
+			}
+		}
+		return errors.Join(failures...)
+	}
+	for _, name := range hookNames {
+		path := filepath.Join(hooks, name)
+		info, err := os.Stat(path)
+		if err != nil {
+			return rollback(err)
+		}
+		if err := write(path, Wrapper(next, name), info.Mode().Perm()); err != nil {
+			return rollback(err)
+		}
+		replaced = append(replaced, replacedHook{path, name, info.Mode().Perm()})
+	}
+	if err := write(statePath(r), data, 0600); err != nil {
+		return rollback(err)
 	}
 	return nil
 }

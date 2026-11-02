@@ -55,6 +55,8 @@ Her yeni clone için `install` çalıştırılır. Aynı paketle tekrarlamak gü
 
 ## Günlük davranış
 
+Politika hataları reddedilen commit başlığını, hata nedenini ve örnek Git komutunu gösterir. Desteklenen terminallerde başlık kırmızı, beklenen biçim sarı, örnek komut yeşil, kural kodu soluk görünür. Dosyaya veya pipe'a yönlendirilen çıktı düz metindir. Renkleri kapatmak için `NO_COLOR=1` kullanabilirsiniz; `TERM=dumb` da renkleri kapatır. Windows konsollarında renkler sanal terminal çıktısı etkin olduğunda kullanılır.
+
 ```text
 feat(auth): biyometrik giriş ekle        → kabul
 fix: kamera iznini düzelt                → kabul
@@ -101,7 +103,7 @@ Yeni paketi ayrı dizine açıp içindeki CLI ile:
 ./bin/refrail doctor --repo "/proje/dizini"
 ```
 
-Geri dönüş için aynı `update` komutunu eski paketle çalıştırın. Her repo sürümünü ayrı sabitler; başka repolar kendiliğinden güncellenmez. Araç/politika dosyaları sürümlü kullanıcı dizinine kopyalanır. Wrapper, IDE PATH ayarına bağlı kalmadan ilk bootstrap binary'sini çağırır; bootstrap güncel durum kaydındaki aktif sürüme yönlendirir. Eski paketler otomatik silinmez: başka repolar veya bootstrap hâlâ kullanıyor olabilir.
+Geri dönüş için aynı `update` komutunu eski paketle çalıştırın. Her repo sürümünü ayrı sabitler; başka repolar kendiliğinden güncellenmez. Araç/politika dosyaları sürümlü kullanıcı dizinine kopyalanır. Wrapper, IDE PATH ayarına bağlı kalmadan seçilen paketin bootstrap binary'sini çağırır. Güncelleme ve geri dönüş, yönetilen wrapper'ları da bu pakete yönlendirir; geçmiş denetiminin başlangıç sınırı korunur. Yazma hatasında değiştirilmiş wrapper'lar eski içeriklerine geri alınır. Eski paketler otomatik silinmez: başka repolar hâlâ kullanıyor olabilir.
 
 Varsayılan paket konumu `os.UserConfigDir()/refrail/packages` altıdır. Test veya taşınabilir kurulum için `REFRAIL_HOME` kullanılabilir; global shell ayarı gerekmez. Git metadata'sında kimlik bilgisi veya erişim token'ı saklanmaz.
 

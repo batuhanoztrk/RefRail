@@ -1,7 +1,15 @@
 package i18n
 
 var turkish = map[string]string{
-	"Cannot locate Git runtime directories: %w":                         "Git çalışma zamanı dizinleri bulunamadı: %w",
+	"Commit message does not meet the policy":   "Commit mesajı uygun değil",
+	"Branch name does not meet the policy":      "Branch adı uygun değil",
+	"Your message:":                             "Mesajınız:",
+	"Expected:":                                 "Beklenen:",
+	"Reason:":                                   "Neden:",
+	"Example:":                                  "Örnek:",
+	"type(scope)!: description":                 "type(scope)!: açıklama",
+	"scope and ! are optional":                  "scope ve ! isteğe bağlıdır",
+	"Cannot locate Git runtime directories: %w": "Git çalışma zamanı dizinleri bulunamadı: %w",
 	"Git --exec-path did not return an absolute directory: %s":          "Git --exec-path mutlak bir dizin döndürmedi: %s",
 	"RefRail executable is missing; restore the bundle or reinstall.":   "RefRail aracı eksik; paketi geri yükleyin veya yeniden kurun.",
 	"Usage: refrail %s [options]":                                       "Kullanım: refrail %s [seçenekler]",

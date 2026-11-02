@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"os"
 	"refrail/internal/i18n"
@@ -28,10 +29,19 @@ func validateMessage(r *gitrepo.Repo, c policy.Config, filename string) error {
 	}
 	for _, message := range variants {
 		if err := c.ValidateCommit(message); err != nil {
-			return err
+			return withCommitMessage(err, message)
 		}
 	}
 	return nil
+}
+
+func withCommitMessage(err error, message string) error {
+	var violation *policy.Violation
+	if errors.As(err, &violation) {
+		header, _, _ := strings.Cut(message, "\n")
+		return &commitDiagnostic{violation, strings.TrimSuffix(header, "\r")}
+	}
+	return err
 }
 
 func requireFullHistory(r *gitrepo.Repo) error {
@@ -73,7 +83,7 @@ func validateHistory(r *gitrepo.Repo, c policy.Config, to string, excludes []str
 		}
 		if err := c.ValidateCommit(strings.TrimRight(message, "\n")); err != nil {
 			if v, ok := err.(*policy.Violation); ok {
-				return &policy.Violation{Rule: v.Rule, Detail: i18n.Errorf("Commit %s: %s", oid[:12], v.Detail), Example: v.Example}
+				return withCommitMessage(&policy.Violation{Rule: v.Rule, Detail: i18n.Errorf("Commit %s: %s", oid[:12], v.Detail), Example: v.Example}, message)
 			}
 			return err
 		}

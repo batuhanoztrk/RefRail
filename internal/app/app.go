@@ -37,15 +37,20 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err == nil {
 		return 0
 	}
-	fmt.Fprintln(stderr, i18n.Text(language, "Error:"), i18n.Render(err, language))
 	var violation *policy.Violation
 	if errors.As(err, &violation) {
+		printViolation(stderr, err, violation, language, outputColor(stderr))
 		return 1
 	}
 	var child *childError
 	if errors.As(err, &child) {
+		// Lefthook has already displayed the policy diagnostic and its summary.
+		if child.code != 1 {
+			printError(stderr, err, language)
+		}
 		return child.code
 	}
+	printError(stderr, err, language)
 	return 2
 }
 
@@ -282,7 +287,12 @@ func hookRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	lefthook := filepath.Join(v.Root, "bin", bundle.Executable("lefthook", runtime.GOOS))
 	// Policies must run even for empty commits and branch-only pushes. Lefthook
 	// otherwise skips pre-push commands when there are no matching changed files.
-	cmd := exec.Command(lefthook, "run", "--no-auto-install", "--no-tty", "--colors", "off", "--skip-lfs", "--force", hook)
+	color := terminalColor(stdout) && terminalColor(stderr)
+	colors, inheritedColor := "off", "0"
+	if color {
+		colors, inheritedColor = "on", "1"
+	}
+	cmd := exec.Command(lefthook, "run", "--no-auto-install", "--no-tty", "--colors", colors, "--skip-lfs", "--force", hook)
 	cmd.Dir = r.Root
 	var env []string
 	for _, item := range os.Environ() {
@@ -297,7 +307,7 @@ func hookRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 	// Git for Windows runs the validator through sh. Use shell-compatible path
 	// separators while retaining native paths for Go's direct process execution.
-	env = append(env, "LEFTHOOK_CONFIG="+filepath.Join(v.Root, "lefthook.yml"), "LEFTHOOK_BIN="+lefthook, "REFRAIL_BIN="+filepath.ToSlash(executable), "NO_COLOR=1")
+	env = append(env, "LEFTHOOK_CONFIG="+filepath.Join(v.Root, "lefthook.yml"), "LEFTHOOK_BIN="+lefthook, "REFRAIL_BIN="+filepath.ToSlash(executable), "REFRAIL_OUTPUT_COLOR="+inheritedColor)
 	if hook == "commit-msg" {
 		env = append(env, "REFRAIL_MESSAGE_FILE="+args[1])
 	} else {
@@ -314,6 +324,14 @@ func hookRun(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	result.Close()
 	defer os.Remove(resultPath)
 	cmd.Env = append(cmd.Env, "REFRAIL_RESULT="+resultPath)
+	if !color {
+		// Lefthook 2.1.17 styles its frame even with --colors off and
+		// NO_COLOR set. Keep redirected logs and unsupported terminals plain.
+		plainOut, plainErr := plainOutputs(stdout, stderr)
+		defer plainOut.flush()
+		defer plainErr.flush()
+		stdout, stderr = plainOut, plainErr
+	}
 	err = child(cmd, stdin, stdout, stderr)
 	if err != nil {
 		data, readErr := os.ReadFile(resultPath)

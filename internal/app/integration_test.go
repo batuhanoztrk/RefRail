@@ -122,7 +122,7 @@ func isolate(t *testing.T) {
 	t.Setenv("REFRAIL_LANG", "en")
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
-	for _, name := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "LEFTHOOK", "LEFTHOOK_EXCLUDE", "LEFTHOOK_CONFIG", "LEFTHOOK_CONFIGS", "REFRAIL_RESULT"} {
+	for _, name := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "LEFTHOOK", "LEFTHOOK_EXCLUDE", "LEFTHOOK_CONFIG", "LEFTHOOK_CONFIGS", "REFRAIL_RESULT", "REFRAIL_OUTPUT_COLOR", "NO_COLOR"} {
 		t.Setenv(name, "")
 		if err := os.Unsetenv(name); err != nil {
 			t.Fatal(err)
@@ -317,18 +317,37 @@ func TestUpdateRollbackAndCorruption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before.Baseline != after.Baseline || before.BootstrapExecutable != after.BootstrapExecutable {
-		t.Fatal("update changed baseline/bootstrap")
+	if before.Baseline != after.Baseline || before.BootstrapExecutable == after.BootstrapExecutable {
+		t.Fatal("update must preserve baseline and refresh bootstrap")
+	}
+	if after.BootstrapExecutable != filepath.Join(after.BundlePath, "bin", bundle.Executable("refrail", runtime.GOOS)) {
+		t.Fatal("bootstrap must use the selected bundle")
 	}
 	newWrapper, _ := os.ReadFile(filepath.Join(hooks, "commit-msg"))
-	if !bytes.Equal(wrapper, newWrapper) {
-		t.Fatal("update rewrote hooks")
+	if bytes.Equal(wrapper, newWrapper) || !bytes.Equal(newWrapper, install.Wrapper(after, "commit-msg")) {
+		t.Fatal("update did not refresh managed hooks")
+	}
+	for _, output := range []string{
+		r.git(false, "commit", "--allow-empty", "-m", "invalid message"),
+		r.git(false, "push", "origin", "HEAD:test"),
+	} {
+		if strings.Contains(output, "Hook validation failed") || strings.Contains(output, "hook doğrulaması başarısız") {
+			t.Fatalf("updated bootstrap duplicated policy failure: %s", output)
+		}
 	}
 	r.git(true, "commit", "--allow-empty", "-m", "feat: after update")
 	if output := r.command(0, "doctor"); !strings.Contains(output, "v0.2.0") {
 		t.Fatal(output)
 	}
 	r.command(0, "update", "--bundle", pkg)
+	rolledBack, err := install.ReadState(repo)
+	if err != nil || rolledBack.BootstrapExecutable != before.BootstrapExecutable || rolledBack.Baseline != before.Baseline {
+		t.Fatalf("rollback must restore bootstrap and preserve baseline: %v", err)
+	}
+	rolledBackWrapper, _ := os.ReadFile(filepath.Join(hooks, "commit-msg"))
+	if !bytes.Equal(wrapper, rolledBackWrapper) {
+		t.Fatal("rollback did not restore original wrapper")
+	}
 	r.git(true, "commit", "--allow-empty", "-m", "fix: rollback works")
 	if err := os.WriteFile(filepath.Join(next, "policy", "default.json"), []byte("corrupt"), 0644); err != nil {
 		t.Fatal(err)
@@ -338,6 +357,10 @@ func TestUpdateRollbackAndCorruption(t *testing.T) {
 	current, _ := os.ReadFile(filepath.Join(install.StateDir(repo), "state.json"))
 	if !bytes.Equal(snapshot, current) {
 		t.Fatal("failed update changed state")
+	}
+	unchangedWrapper, _ := os.ReadFile(filepath.Join(hooks, "commit-msg"))
+	if !bytes.Equal(wrapper, unchangedWrapper) {
+		t.Fatal("failed update changed wrapper")
 	}
 	active, err := install.ReadState(repo)
 	if err != nil {
@@ -499,7 +522,10 @@ func TestLocalizedCLIAndHooks(t *testing.T) {
 	pkg := testBundle(t, "v0.1.0")
 	r := newRepo(t, pkg, true)
 	r.command(0, "install", "--bundle", pkg)
-	for _, tc := range []struct{ language, commands, errorLabel, format string }{{"en", "Commands:", "Error:", "Expected type(scope)"}, {"tr", "Komutlar:", "Hata:", "beklenen biçim type(scope)"}} {
+	for _, tc := range []struct{ language, commands, errorLabel, heading, format string }{
+		{"en", "Commands:", "Error:", "Commit message does not meet the policy", "Expected: type(scope)!: description"},
+		{"tr", "Komutlar:", "Hata:", "Commit mesajı uygun değil", "Beklenen: type(scope)!: açıklama"},
+	} {
 		t.Run(tc.language, func(t *testing.T) {
 			t.Setenv("REFRAIL_LANG", tc.language)
 			var out, stderr bytes.Buffer
@@ -512,12 +538,27 @@ func TestLocalizedCLIAndHooks(t *testing.T) {
 				t.Fatalf("error: %d %s", code, &stderr)
 			}
 			output := r.git(false, "commit", "--allow-empty", "-m", "invalid message")
-			if !strings.Contains(output, tc.format) || !strings.Contains(output, tc.errorLabel) {
+			if !strings.Contains(output, tc.format) || !strings.Contains(output, tc.heading) || !strings.Contains(output, "invalid message") || !strings.Contains(output, "git commit -m \"") {
 				t.Fatalf("hook lost language %s: %s", tc.language, output)
+			}
+			if strings.Contains(output, "\x1b[") || strings.Contains(output, "Hook validation failed") || strings.Contains(output, "hook doğrulaması başarısız") {
+				t.Fatalf("redirected hook contains colors or duplicate summary: %s", output)
 			}
 			if output := r.command(0, "doctor"); !strings.Contains(output, "Lefthook") {
 				t.Fatal(output)
 			}
 		})
+	}
+}
+
+func TestHookIgnoresInheritedColorOverrideWhenRedirected(t *testing.T) {
+	isolate(t)
+	pkg := testBundle(t, Version)
+	r := newRepo(t, pkg, true)
+	r.command(0, "install", "--bundle", pkg)
+	t.Setenv("REFRAIL_OUTPUT_COLOR", "1")
+	output := r.git(false, "commit", "--allow-empty", "-m", "test commit")
+	if strings.Contains(output, "\x1b[") || strings.Count(output, "[commit-format]") != 1 {
+		t.Fatalf("parent must select plain output for redirected hooks: %q", output)
 	}
 }

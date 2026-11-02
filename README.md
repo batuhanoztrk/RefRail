@@ -106,6 +106,8 @@ For CI, tests, or an explicit preference, set `REFRAIL_LANG=tr` or `REFRAIL_LANG
 
 If the bootstrap executable itself is missing, the shell wrapper provides a bilingual recovery message because RefRail cannot start to detect the device language.
 
+Policy failures show the rejected commit header, the validation reason, and an example Git command. Supported terminals use red headings, yellow requirements, green examples, and dim rule identifiers. Redirected output stays plain; set a nonempty `NO_COLOR` to disable colors explicitly. `TERM=dumb` also disables colors. Windows consoles use colors when virtual terminal output is enabled.
+
 ## Update, rollback, and removal
 
 Extract a new bundle and run:
@@ -115,7 +117,7 @@ Extract a new bundle and run:
 ./bin/refrail doctor --repo "/path/to/project"
 ```
 
-Use `update` with an older bundle to roll back. Versions are pinned per clone. Bundles live under `os.UserConfigDir()/refrail/packages`, or `REFRAIL_HOME` when set. Wrappers use absolute executable paths and an atomically selected active bundle. Old bundles are retained because other clones or bootstrap wrappers may still use them.
+Use `update` with an older bundle to roll back. Versions are pinned per clone. Bundles live under `os.UserConfigDir()/refrail/packages`, or `REFRAIL_HOME` when set. Updates and rollbacks refresh the managed wrappers to use the selected bundle's absolute executable path, preserving the installation baseline. If a write fails, already-replaced wrappers are restored. Old bundles are retained because other clones may still use them.
 
 ```sh
 ./bin/refrail uninstall --repo "/path/to/project"
