@@ -1,0 +1,8 @@
+{
+  "commitTypes": ["feat", "fix", "docs", "chore", "revert"],
+  "branchPrefixes": ["feat", "fix", "docs", "chore", "hotfix"],
+  "maxHeaderLength": 72,
+  "allowedScopes": ["auth", "camera", "api"],
+  "requireScope": true,
+  "requireTicket": true
+}

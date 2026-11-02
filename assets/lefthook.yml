@@ -1,0 +1,14 @@
+no_auto_install: true
+no_tty: true
+assert_lefthook_installed: true
+
+commit-msg:
+  commands:
+    refrail-commit-policy:
+      run: '"$REFRAIL_BIN" commit-msg'
+
+pre-push:
+  commands:
+    refrail-push-policy:
+      run: '"$REFRAIL_BIN" pre-push'
+      use_stdin: true
