@@ -15,6 +15,10 @@ on:
         description: Submit a pull request to microsoft/winget-pkgs
         type: boolean
         default: false
+      private_winget:
+        description: Publish to the private WinGet source through Portainer
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,18 +35,24 @@ jobs:
       RELEASE_TAG: ${{ inputs.tag }}
       DO_HOMEBREW: ${{ inputs.homebrew }}
       DO_WINGET: ${{ inputs.winget }}
+      DO_PRIVATE_WINGET: ${{ inputs.private_winget }}
       TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY || 'batuhanoztrk/homebrew-tap' }}
       PACKAGE_IDENTIFIER: ${{ vars.WINGET_PACKAGE_IDENTIFIER || 'batuhanoztrk.RefRail' }}
       PACKAGE_PUBLISHER: ${{ vars.WINGET_PUBLISHER || 'batuhanoztrk' }}
+      PRIVATE_WINGET_PORTAINER_URL: ${{ vars.PRIVATE_WINGET_PORTAINER_URL }}
+      PRIVATE_WINGET_STACK_ID: ${{ vars.PRIVATE_WINGET_STACK_ID }}
+      PRIVATE_WINGET_STACK_NAME: ${{ vars.PRIVATE_WINGET_STACK_NAME || 'winget' }}
+      PRIVATE_WINGET_SOURCE_URL: ${{ vars.PRIVATE_WINGET_SOURCE_URL || 'https://winget.noktabilisim.com/api' }}
     steps:
       - name: Check all selected channels before making changes
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           WINGET_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+          PORTAINER_KEY: ${{ secrets.PRIVATE_WINGET_PORTAINER_API_KEY }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          [[ "$DO_HOMEBREW" = true || "$DO_WINGET" = true ]]
+          [[ "$DO_HOMEBREW" = true || "$DO_WINGET" = true || "$DO_PRIVATE_WINGET" = true ]]
           if [ "$DO_HOMEBREW" = true ]; then
             [[ "$TAP_REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9-]*/homebrew-[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]
             test -n "$TAP_TOKEN" || { echo 'Missing HOMEBREW_TAP_TOKEN.' >&2; exit 1; }
@@ -50,17 +60,38 @@ jobs:
           if [ "$DO_WINGET" = true ]; then
             test -n "$WINGET_TOKEN" || { echo 'Missing WINGET_CREATE_GITHUB_TOKEN.' >&2; exit 1; }
           fi
+          if [ "$DO_PRIVATE_WINGET" = true ]; then
+            test -n "$PORTAINER_KEY" || { echo 'Missing PRIVATE_WINGET_PORTAINER_API_KEY.' >&2; exit 1; }
+            test -n "$PRIVATE_WINGET_PORTAINER_URL" || { echo 'Missing PRIVATE_WINGET_PORTAINER_URL.' >&2; exit 1; }
+            test -n "$PRIVATE_WINGET_STACK_ID" || { echo 'Missing PRIVATE_WINGET_STACK_ID.' >&2; exit 1; }
+          fi
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName > release.json
           jq -e --arg tag "$RELEASE_TAG" '.isDraft == false and .isPrerelease == false and .tagName == $tag' release.json
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          # Deployment tools belong to the workflow revision, even for an older release.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install metadata validation tools
+        run: |
+          python3 -m venv .cache/packaging-venv
+          .cache/packaging-venv/bin/pip install -r tools/packaging/requirements.txt
+      - name: Check the private stack before any channel is updated
+        if: inputs.private_winget
+        env:
+          PRIVATE_WINGET_PORTAINER_API_KEY: ${{ secrets.PRIVATE_WINGET_PORTAINER_API_KEY }}
+        run: .cache/packaging-venv/bin/python tools/distribution/private_winget.py preflight
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
           ref: refs/tags/${{ inputs.tag }}
+          path: release-source
           persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version-file: go.mod
+          go-version-file: release-source/go.mod
           cache: false
       - name: Regenerate metadata from the published release's verified ZIPs
+        working-directory: release-source
         run: |
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets \
             --pattern 'refrail_*.zip' --pattern SHA256SUMS
@@ -68,13 +99,19 @@ jobs:
             --winget-id "$PACKAGE_IDENTIFIER" --publisher "$PACKAGE_PUBLISHER" \
             --dist release-assets --out packages
           ruby -c packages/homebrew/Formula/refrail.rb
-          python3 -m venv .cache/packaging-venv
-          .cache/packaging-venv/bin/pip install -r tools/packaging/requirements.txt
-          .cache/packaging-venv/bin/python tools/packaging/validate-winget.py packages/winget
+          ../.cache/packaging-venv/bin/python tools/packaging/validate-winget.py packages/winget
+      - name: Approve the private source's published manifest archive
+        if: inputs.private_winget
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --dir release-source/packages/private --pattern winget-manifests.zip
+          .cache/packaging-venv/bin/python tools/distribution/private_winget.py verify-archive \
+            --archive release-source/packages/private/winget-manifests.zip \
+            --metadata release-source/packages/winget
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: distribution-metadata
-          path: packages/
+          path: release-source/packages/
           if-no-files-found: error
           retention-days: 14
 
@@ -138,3 +175,37 @@ jobs:
           $manifest = Join-Path 'packages/winget/manifests' "$partition/$packagePath/$version"
           & $tool submit $manifest --no-open
           if ($LASTEXITCODE -ne 0) { throw "WinGetCreate failed with exit code $LASTEXITCODE" }
+
+  private-winget:
+    name: Publish to private WinGet (Portainer)
+    if: inputs.private_winget
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      PRIVATE_WINGET_PORTAINER_URL: ${{ vars.PRIVATE_WINGET_PORTAINER_URL }}
+      PRIVATE_WINGET_STACK_ID: ${{ vars.PRIVATE_WINGET_STACK_ID }}
+      PRIVATE_WINGET_STACK_NAME: ${{ vars.PRIVATE_WINGET_STACK_NAME || 'winget' }}
+      PRIVATE_WINGET_SOURCE_URL: ${{ vars.PRIVATE_WINGET_SOURCE_URL || 'https://winget.noktabilisim.com/api' }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: distribution-metadata
+          path: packages
+      - name: Install publishing tools
+        run: |
+          python3 -m venv .cache/packaging-venv
+          .cache/packaging-venv/bin/pip install -r tools/packaging/requirements.txt
+      - name: Update the stack and verify both packages and cached installers
+        env:
+          PRIVATE_WINGET_PORTAINER_API_KEY: ${{ secrets.PRIVATE_WINGET_PORTAINER_API_KEY }}
+        run: |
+          .cache/packaging-venv/bin/python tools/distribution/private_winget.py publish \
+            --tag "$RELEASE_TAG" --archive packages/private/winget-manifests.zip \
+            --metadata packages/winget
+          echo "Private WinGet verified for $RELEASE_TAG (including Git.Git and installer SHA256 checks)." >> "$GITHUB_STEP_SUMMARY"

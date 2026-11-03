@@ -22,6 +22,16 @@ winget install --exact --id batuhanoztrk.RefRail
 refrail install --repo "C:\Projects\app"
 ```
 
+For the managed Nokta Bilişim source:
+
+```powershell
+winget source add --name noktabilisim --arg https://winget.noktabilisim.com/api --type Microsoft.Rest
+winget install --exact --id batuhanoztrk.RefRail --source noktabilisim
+```
+
+The private catalog must contain Git.Git too; its Portainer stack seeds this
+dependency. See the [private source setup](docs/releasing.md#private-winget-one-time-portainer-setup).
+
 Homebrew supports macOS and Linux, on Intel/AMD64 and ARM64. WinGet packages
 target Windows x64 and ARM64 and declare Git for Windows as a dependency.
 RefRail finds its complete bundle through the package manager's executable

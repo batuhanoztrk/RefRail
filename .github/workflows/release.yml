@@ -69,4 +69,4 @@ jobs:
               --verify-tag --draft --title "RefRail $RELEASE_TAG" --generate-notes
           fi
           echo "Draft ready: https://github.com/$GITHUB_REPOSITORY/releases" >> "$GITHUB_STEP_SUMMARY"
-          echo 'Review and publish the draft, then run the Distribute workflow.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Review and publish the draft, then run Distribute and select Homebrew, Microsoft WinGet and/or private WinGet (Portainer).' >> "$GITHUB_STEP_SUMMARY"

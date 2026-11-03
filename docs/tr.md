@@ -22,6 +22,19 @@ winget install --exact --id batuhanoztrk.RefRail
 refrail install --repo "C:\Projeler\uygulama"
 ```
 
+Nokta Bilişim'in yönettiği WinGet kaynağından kurulum:
+
+```powershell
+# Kaynağı bir kez ekleyin; zaten ekliyse yalnızca güncelleyin.
+winget source add --name noktabilisim --arg https://winget.noktabilisim.com/api --type Microsoft.Rest
+winget source update --name noktabilisim
+winget install --exact --id batuhanoztrk.RefRail --source noktabilisim
+```
+
+Özel kaynakta `Git.Git` bağımlılığının da bulunması gerekir; güncel Portainer
+stack'i bunu ekler. Sonraki sürümler için
+`winget upgrade --exact --id batuhanoztrk.RefRail --source noktabilisim` kullanın.
+
 Homebrew tap deposu `batuhanoztrk/homebrew-tap`, kısa tap adı
 `batuhanoztrk/tap` şeklindedir. Homebrew macOS/Linux AMD64 ve ARM64, WinGet ise
 Windows x64 ve ARM64 paketlerini kullanır. WinGet, Git for Windows bağımlılığını
@@ -31,10 +44,11 @@ clone'lar eski sürümlerini korur; geçirmek istediğiniz her clone için
 `refrail update --repo <yol>` çalıştırın. CLI'ı kaldırmadan önce hook'larını
 kaldırmak istediğiniz her clone'da `refrail uninstall --repo <yol>` kullanın.
 
-CI, tag ile taslak release üretimi ve Homebrew/WinGet dağıtım workflow'ları
+CI, tag ile taslak release üretimi ve Homebrew/Microsoft WinGet/özel WinGet dağıtım workflow'ları
 hazırdır. İlk GitHub kurulumu, secret'lar ve yayın sırası için
 [yayın rehberine](releasing.md) bakın. WinGet paketinin katalogda görünmesi
-Microsoft'un PR doğrulaması ve kabulünden sonra gerçekleşir.
+Microsoft'un PR doğrulaması ve kabulünden sonra gerçekleşir. Özel kaynak
+Portainer API ile doğrudan güncellenir; Microsoft PR onayı bu kanal için gerekmez.
 
 İşletim sisteminize/mimarinize uygun ZIP'i açıp içindeki `refrail` dizinine
 girin. Bu paket kökünden:

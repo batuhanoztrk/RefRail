@@ -2,7 +2,8 @@
 
 The source repository is `batuhanoztrk/RefRail`. Homebrew uses
 `batuhanoztrk/homebrew-tap` and WinGet uses `batuhanoztrk.RefRail`, with publisher
-`batuhanoztrk`. These files prepare publication; adding them locally does not
+`batuhanoztrk`. The optional private WinGet source is
+`https://winget.noktabilisim.com/api`, managed through Portainer. These files prepare publication; adding them locally does not
 create repositories, push tags, publish releases, or submit packages.
 
 ## First-time GitHub setup
@@ -40,7 +41,7 @@ create repositories, push tags, publish releases, or submit packages.
 
    The normal `GITHUB_TOKEN` cannot write to a different tap repository. A
    WinGet token must also work with the upstream repository and your fork;
-   follow [Microsoft's token instructions](https://github.com/microsoft/winget-create/blob/v1.12.13.0/README.md#github-personal-access-token-classic-permissions).
+   follow [Microsoft's token instructions](https://github.com/microsoft/winget-create/blob/v1.12.13.0/doc/token.md).
    Secrets are needed only for selected distribution channels. Draft-release
    creation uses the job-scoped `GITHUB_TOKEN` with `contents: write`.
    The tap workflow pushes directly to its default branch; allow this token to
@@ -76,19 +77,103 @@ create repositories, push tags, publish releases, or submit packages.
    overwritten by the workflow.
 
 4. In **Actions → Distribute → Run workflow**, select the published tag and
-   desired channels. Homebrew defaults on; WinGet submission is an explicit
-   checkbox. The workflow refuses drafts and prereleases, checks selected
+   desired channels: **homebrew**, **winget** (Microsoft community PR), and
+   **private_winget** (Portainer). Homebrew defaults on; both WinGet channels
+   default off. Any combination is supported; turn Homebrew off for a private-only
+   run. The workflow refuses drafts and prereleases, checks selected
    credentials, downloads and verifies the published runtime assets, and
    regenerates metadata. It then updates the tap and/or submits a PR to
-   `microsoft/winget-pkgs`. WinGet availability requires Microsoft's validation
+   `microsoft/winget-pkgs`, and/or updates the private stack. Private distribution
+   also verifies the published manifest archive against the regenerated metadata,
+   checks Portainer access and stack compatibility before any channel changes,
+   and verifies RefRail, Git.Git and all four unique Windows installers after the
+   update. Selected channels run independently after preparation; a later failure
+   does not roll back another channel. Microsoft WinGet availability requires Microsoft's validation
    and acceptance; creating a PR does not immediately publish a package. Review
    and close an existing pending PR before retrying a WinGet submission, to
    avoid duplicates.
 
 Do not reuse a released tag for changed content. Publish a new version instead.
 Keep the package identifier and publisher spelling stable across updates.
-Homebrew's tap updates are immediately available through `brew update`; WinGet
+Homebrew's tap updates are immediately available through `brew update`; Microsoft WinGet
 updates use the same PR and acceptance process as the first submission.
+
+## Private WinGet: one-time Portainer setup
+
+The checked-in [ARM64 stack](../deploy/rewinged/stack-arm64.yml) targets
+**Docker Standalone**, matching the existing Portainer host. Keep the existing
+stack name (`winget`) and the named volume keys when replacing its editor
+contents. The stack builds rewinged 0.15.0 natively because its official image
+is AMD64-only. The source archive is SHA256 pinned; Go caches and the resulting
+binary persist across deployments. It exposes host port **8088** to container
+port 8080. CloudPanel must proxy the whole domain to that port, preserving
+`X-Forwarded-Host` and `X-Forwarded-Proto: https`, including `/installers/`.
+
+1. In **Portainer → Stacks → winget → Editor**, replace the old YAML with
+   `deploy/rewinged/stack-arm64.yml` and update the stack. Do not delete its
+   volumes. Bootstrap defaults to the existing published `v0.1.0` and its
+   verified `winget-manifests.zip` hash. It seeds official **Git.Git 2.56.0.4**
+   manifests too. This repairs the reported `No matches / Error processing
+   package dependencies` failure: WinGet requires dependencies in the same source.
+   RefRail continues to declare Git as a dependency in both WinGet channels.
+2. In **Portainer → My account → Access tokens**, create an access token and
+   copy it once. Use an account permitted to inspect and update this stack in
+   its environment. Store the token in GitHub as a secret, never in the stack
+   editor or a public repository. Portainer must be reachable over HTTPS from
+   the GitHub-hosted runner; a CloudPanel proxy for Portainer can provide this.
+3. Get the stack ID from its Portainer details URL (`.../stacks/42?...` means
+   `42`). This is the **stack ID**, not the environment/endpoint ID; the helper
+   reads the latter from Portainer.
+4. Under **RefRail → Settings → Secrets and variables → Actions**, add:
+
+   | Kind | Name | Value |
+   | --- | --- | --- |
+   | Variable | `PRIVATE_WINGET_PORTAINER_URL` | Your Portainer HTTPS base URL, without `/api` |
+   | Variable | `PRIVATE_WINGET_STACK_ID` | Positive numeric stack ID |
+   | Variable (optional) | `PRIVATE_WINGET_STACK_NAME` | Defaults to `winget`; must match the existing stack |
+   | Variable (optional) | `PRIVATE_WINGET_SOURCE_URL` | Defaults to `https://winget.noktabilisim.com/api` |
+   | Secret | `PRIVATE_WINGET_PORTAINER_API_KEY` | Portainer access token |
+
+5. Run **Distribute** from the updated `main` branch with the published tag
+   (including existing `v0.1.0`), and select **private_winget**. The helper uses
+   tools from the workflow revision and package metadata from the release tag,
+   so old releases need no moved tag or new assets. The published manifest ZIP
+   must match regenerated metadata, including the package ID and publisher.
+
+The helper reads the stack and its YAML through Portainer's API, checks the stack
+name/type/template, and sends the unchanged YAML back with merged environment
+variables. Only `REFRAIL_TAG`, `REFRAIL_MANIFEST_SHA256` and
+`REFRAIL_DEPLOY_REVISION` are managed. The revision forces init and server to
+recreate even on a retry of the same tag. Historical versions remain available;
+selecting an older tag does not remove or supersede a newer catalog version.
+The key is sent only to Portainer, over HTTPS, with redirects refused. There is
+no rewinged upload endpoint and no SSH or exposed Docker API requirement.
+
+Installer caching can take a few minutes, especially on first Git download.
+The job waits for both package manifests and checks the cached downloads' hashes,
+including Git's x64/ARM64 installers. If verification fails, inspect
+`manifests-init` and `rewinged` logs. A failed rewinged download can leave a
+partial file in the `installers` volume; remove only the affected hash-named file
+and restart the server before retrying. Do not clear the whole volume.
+The pinned Git manifests, provenance and update instructions are in
+[deploy/rewinged/git](../deploy/rewinged/git/README.md).
+
+On Windows, after the private job succeeds:
+
+```powershell
+# Add once; administrator access may be required for source management.
+winget source add --name noktabilisim --arg https://winget.noktabilisim.com/api --type Microsoft.Rest
+winget source update --name noktabilisim
+winget show --exact --id Git.Git --source noktabilisim
+winget install --exact --id batuhanoztrk.RefRail --source noktabilisim
+```
+
+For later releases use `winget upgrade --exact --id batuhanoztrk.RefRail --source
+noktabilisim`. Open a new terminal if PATH changes are not visible, then run
+`git --version`, `refrail version --json` and `refrail doctor --repo <path>`.
+The source API/download checks do not replace this Windows installation pilot.
+This source permits anonymous reads; installers are accessible to anyone who
+can reach the domain, despite the term “private” referring to the managed catalog.
 
 ## Generate metadata locally
 
@@ -153,6 +238,9 @@ retained intentionally.
 - [Homebrew formula cookbook](https://docs.brew.sh/Formula-Cookbook)
 - [WinGet manifest documentation](https://learn.microsoft.com/en-us/windows/package-manager/package/manifest)
 - [WinGetCreate submit command](https://github.com/microsoft/winget-create/blob/v1.12.13.0/doc/submit.md)
+- [WinGet dependency source requirements](https://github.com/microsoft/winget-pkgs/blob/master/doc/manifest/schema/1.10.0/installer.md#dependencies)
+- [Portainer API access](https://docs.portainer.io/api/access)
+- [Portainer stack update API implementation](https://github.com/portainer/portainer/blob/2.33.6/api/http/handler/stacks/stack_update.go)
 
 GitHub Actions are pinned to commit hashes. WinGetCreate is pinned to version
 1.12.13.0 and SHA-256. Vendored WinGet schemas are version 1.10.0; provenance

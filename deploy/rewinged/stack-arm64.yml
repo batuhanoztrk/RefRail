@@ -1,0 +1,128 @@
+# refrail-private-winget-stack-v1
+# Docker Standalone, ARM64. Keep the existing stack name and volume keys.
+services:
+  rewinged-build:
+    image: golang:1.27-alpine
+    platform: linux/arm64
+    restart: "no"
+    environment:
+      CGO_ENABLED: "0"
+      GOOS: "linux"
+      GOARCH: "arm64"
+      GOTOOLCHAIN: "local"
+    volumes:
+      - binary:/out
+      - go-modules:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        apk add --no-cache ca-certificates curl git tar
+        work=$$(mktemp -d)
+        trap 'rm -rf "$$work"' EXIT
+        curl --fail --location --retry 3 --max-time 180 \
+          "https://codeload.github.com/jantari/rewinged/tar.gz/refs/tags/v0.15.0" \
+          --output "$$work/source.tar.gz"
+        echo "c7d872cd3917b5671c3e2220e02f5aa27b972648ce95dfdab6aa0bd51b742c6d  $$work/source.tar.gz" | sha256sum -c -
+        mkdir "$$work/source"
+        tar -xzf "$$work/source.tar.gz" --strip-components=1 -C "$$work/source"
+        cd "$$work/source"
+        go build -mod=readonly -trimpath \
+          -ldflags="-s -w -X main.version=0.15.0 -X main.releaseMode=true" \
+          -o /out/rewinged.next .
+        cp /etc/ssl/certs/ca-certificates.crt /out/ca-certificates.crt
+        chmod 644 /out/ca-certificates.crt
+        chmod 755 /out/rewinged.next
+        mv -f /out/rewinged.next /out/rewinged
+        echo "ARM64 rewinged binary is ready."
+
+  manifests-init:
+    image: alpine:3.22
+    platform: linux/arm64
+    restart: "no"
+    environment:
+      REFRAIL_TAG: "${REFRAIL_TAG:-v0.1.0}"
+      REFRAIL_MANIFEST_SHA256: "${REFRAIL_MANIFEST_SHA256:-1956965920edd60b5ec4bb0b13b8ae0953f4e7d55eea35101e091af409a8a25d}"
+      REFRAIL_DEPLOY_REVISION: "${REFRAIL_DEPLOY_REVISION:-bootstrap}"
+    volumes:
+      - manifests:/packages
+      - installers:/installers
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        apk add --no-cache curl unzip ca-certificates
+        work=$$(mktemp -d)
+        trap 'rm -rf "$$work"' EXIT
+        curl --fail --location --retry 3 --max-time 180 \
+          "https://github.com/batuhanoztrk/RefRail/releases/download/$${REFRAIL_TAG}/winget-manifests.zip" \
+          --output "$$work/winget-manifests.zip"
+        echo "$${REFRAIL_MANIFEST_SHA256}  $$work/winget-manifests.zip" | sha256sum -c -
+        unzip -q "$$work/winget-manifests.zip" -d "$$work/extracted"
+        gitdir="$$work/git/g/Git/Git/2.56.0.4"
+        mkdir -p "$$gitdir"
+        gitbase="https://raw.githubusercontent.com/microsoft/winget-pkgs/1999a32cfbf21f832643742522e1b1e8f651fd20/manifests/g/Git/Git/2.56.0.4"
+        for file in Git.Git.yaml Git.Git.installer.yaml Git.Git.locale.en-US.yaml; do
+          curl --fail --location --retry 3 --max-time 180 "$$gitbase/$$file" --output "$$gitdir/$$file"
+        done
+        (cd "$$gitdir" && sha256sum -c - <<'SUMS'
+        2460586a1f1de28f4befc438b37bdacb8ab4d536435251b8fcbffadfe0e34511  Git.Git.yaml
+        661af7adecdc1104ff06434e0b697bc8fb5e5f4a389795ea48865a466bcdd954  Git.Git.installer.yaml
+        bcb5de376f3d049ebd1913d4964a6ca0f541f6c27ab0125a0dca9345bba84643  Git.Git.locale.en-US.yaml
+        SUMS
+        )
+        test -d "$$work/extracted/manifests"
+        cp -R "$$work/extracted/manifests/." /packages/
+        cp -R "$$work/git/." /packages/
+        chown -R 10002:10002 /packages /installers
+        chmod 755 /packages /installers
+        echo "RefRail and Git.Git manifests are ready."
+
+  rewinged:
+    image: alpine:3.22
+    platform: linux/arm64
+    user: "10002:10002"
+    entrypoint: ["/opt/rewinged/rewinged"]
+    command: []
+    restart: unless-stopped
+    depends_on:
+      rewinged-build:
+        condition: service_completed_successfully
+      manifests-init:
+        condition: service_completed_successfully
+    ports:
+      - "8088:8080"
+    environment:
+      # These force recreation after init, including a retry of the same tag.
+      REFRAIL_TAG: "${REFRAIL_TAG:-v0.1.0}"
+      REFRAIL_MANIFEST_SHA256: "${REFRAIL_MANIFEST_SHA256:-1956965920edd60b5ec4bb0b13b8ae0953f4e7d55eea35101e091af409a8a25d}"
+      REFRAIL_DEPLOY_REVISION: "${REFRAIL_DEPLOY_REVISION:-bootstrap}"
+      SSL_CERT_FILE: "/opt/rewinged/ca-certificates.crt"
+      REWINGED_LISTEN: "0.0.0.0:8080"
+      REWINGED_MANIFESTPATH: "/packages"
+      REWINGED_AUTOINTERNALIZE: "true"
+      REWINGED_AUTOINTERNALIZEPATH: "/installers"
+      REWINGED_SOURCEAUTHTYPE: "none"
+      REWINGED_LOGLEVEL: "info"
+    volumes:
+      - binary:/opt/rewinged:ro
+      - manifests:/packages:ro
+      - installers:/installers
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  binary:
+  go-modules:
+  go-build-cache:
+  manifests:
+  installers:
